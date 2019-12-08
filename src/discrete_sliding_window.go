@@ -82,6 +82,8 @@ type accessCounter byte
 //
 // Since we advertise in API an interval of 1h, it creates an unpredictable experience to
 // users to silently increase the interval. Therefore, we accept the edge case with a shortened full interval.
+// 64 bytes + sizeof(IntervalBuckets) + 48 bytes for the cache entry overhead => 122 bytes per entry.
+// 1GB stores ~8.2M entries
 type swcb struct {
 	StartTimeOfIntervalLastAccessed time.Time
 	IndexOfLastAccess               int
@@ -108,10 +110,19 @@ func (cb *swcb) accessAttempt(clock Clock, accessCost accessCounter) bool {
 
 	quotaAvailable := cb.AccessesInCurrentWindow < MAX_REQUESTS_IN_FULL_INTERVAL
 
-	cb.IntervalBuckets[cb.IndexOfLastAccess] += accessCost
-	cb.AccessesInCurrentWindow += accessCost
+	// increment guarding against overflow errors
+	cb.IntervalBuckets[cb.IndexOfLastAccess] = max(cb.IntervalBuckets[cb.IndexOfLastAccess], cb.IntervalBuckets[cb.IndexOfLastAccess]+accessCost)
+	cb.AccessesInCurrentWindow = max(cb.AccessesInCurrentWindow, cb.AccessesInCurrentWindow+accessCost)
 
 	return quotaAvailable
+}
+
+func max(a, b accessCounter) accessCounter {
+	if a > b {
+		return a
+	} else {
+		return b
+	}
 }
 
 func (cb *swcb) reconcileSubWindows(now time.Time) {

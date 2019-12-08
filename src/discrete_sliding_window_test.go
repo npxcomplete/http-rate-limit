@@ -3,10 +3,12 @@ package ratelimit
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 
@@ -109,6 +111,25 @@ func Test_excess_cache_space_implies_no_eviction(t *testing.T) {
 
 	// put Dave in a limited state
 	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL; i++ {
+		limiter.AttemptAccess("Dave", 1)
+	}
+	assert.False(t, limiter.AttemptAccess("Dave", 1))
+
+	limiter.AttemptAccess("Gary", 1)
+	assert.Equal(t, 0, len(logs.Lines))
+}
+
+func Test_byte_boundry_no_overflow(t *testing.T) {
+	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	limiter := &slidingWindowRateLimiter{
+		cache: NewLRUStringSWCBCache(2),
+		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
+		log:   logs,
+	}
+
+	// what happens on overflow
+	bound := math.Pow(2, 8*float64(unsafe.Sizeof(accessCounter(0))))
+	for i := 0; i < int(bound); i++ {
 		limiter.AttemptAccess("Dave", 1)
 	}
 	assert.False(t, limiter.AttemptAccess("Dave", 1))

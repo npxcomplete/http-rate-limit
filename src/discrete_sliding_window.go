@@ -88,7 +88,7 @@ type swcb struct {
 	StartTimeOfIntervalLastAccessed time.Time
 	IndexOfLastAccess               int
 	IntervalBuckets                 []accessCounter
-	AccessesInCurrentWindow         accessCounter
+	AccessesInCurrentWindow         int
 }
 
 func (cb *swcb) wouldBeLimited(clock Clock) bool {
@@ -111,13 +111,15 @@ func (cb *swcb) accessAttempt(clock Clock, accessCost accessCounter) bool {
 	quotaAvailable := cb.AccessesInCurrentWindow < MAX_REQUESTS_IN_FULL_INTERVAL
 
 	// increment guarding against overflow errors
-	cb.IntervalBuckets[cb.IndexOfLastAccess] = max(cb.IntervalBuckets[cb.IndexOfLastAccess], cb.IntervalBuckets[cb.IndexOfLastAccess]+accessCost)
-	cb.AccessesInCurrentWindow = max(cb.AccessesInCurrentWindow, cb.AccessesInCurrentWindow+accessCost)
-
+	quotaUsed := cb.IntervalBuckets[cb.IndexOfLastAccess]
+	if quotaUsed+accessCost > quotaUsed {
+		cb.IntervalBuckets[cb.IndexOfLastAccess] = quotaUsed + accessCost
+		cb.AccessesInCurrentWindow = cb.AccessesInCurrentWindow + int(accessCost)
+	}
 	return quotaAvailable
 }
 
-func max(a, b accessCounter) accessCounter {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	} else {
@@ -141,19 +143,20 @@ func (cb *swcb) reconcileSubWindows(now time.Time) {
 		}
 	} else {
 		// sub interval iterator
-		i := cb.IndexOfLastAccess
+		i := ModuloRel{value: cb.IndexOfLastAccess, mod: SUB_INTERVAL_COUNT}
 		// starting in interval 1 and adding 3.5 intervals should place us in interval 4
 		intervalsSinceLastAccess := int(math.Floor(float64(durationSinceLastAccess) / float64(SUB_INTERVAL_LENGTH)))
 		// current sub interval index
-		k := (i + intervalsSinceLastAccess) % SUB_INTERVAL_COUNT
+		k := i.Add(intervalsSinceLastAccess)
 
-		for ; i < k; i++ {
-			cb.AccessesInCurrentWindow -= cb.IntervalBuckets[i]
-			cb.IntervalBuckets[i] = 0
+		for ; i != k; {
+			i = i.Increment()
+			cb.AccessesInCurrentWindow -= int(cb.IntervalBuckets[i.value])
+			cb.IntervalBuckets[i.value] = 0
 		}
 		cb.StartTimeOfIntervalLastAccessed =
 			cb.StartTimeOfIntervalLastAccessed.Add(time.Duration(intervalsSinceLastAccess) * SUB_INTERVAL_LENGTH)
-		cb.IndexOfLastAccess = k
+		cb.IndexOfLastAccess = k.value
 	}
 }
 

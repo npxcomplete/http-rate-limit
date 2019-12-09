@@ -17,6 +17,7 @@ import (
 )
 
 var start = time.Date(2000, 3, 12, 10, 10, 10, 0, time.UTC)
+var bound = math.Pow(2, 8*float64(unsafe.Sizeof(accessCounter(0))))
 
 func Test_smoke_test_happy_path_with_http(t *testing.T) {
 	limiter := &slidingWindowRateLimiter{
@@ -119,7 +120,24 @@ func Test_excess_cache_space_implies_no_eviction(t *testing.T) {
 	assert.Equal(t, 0, len(logs.Lines))
 }
 
-func Test_byte_boundry_no_overflow(t *testing.T) {
+func Test_cache_eviction_of_potentially_rate_limited_clients_are_logged(t *testing.T) {
+	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	limiter := &slidingWindowRateLimiter{
+		cache: NewLRUStringSWCBCache(1),
+		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
+		log:   logs,
+	}
+
+	// put Dave in a limited state
+	limiter.AttemptAccess("Dave", 1)
+	limiter.AttemptAccess("Gary", 1)
+	if !assert.Equal(t, 1, len(logs.Lines)) {
+		return
+	}
+	assert.Equal(t, "Rate limiter forced to evict a client susceptible rate limiting.", logs.Lines[0])
+}
+
+func Test_byte_boundary_no_overflow(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
 	limiter := &slidingWindowRateLimiter{
 		cache: NewLRUStringSWCBCache(2),
@@ -138,19 +156,108 @@ func Test_byte_boundry_no_overflow(t *testing.T) {
 	assert.Equal(t, 0, len(logs.Lines))
 }
 
-func Test_cache_eviction_of_potentially_rate_limited_clients_are_logged(t *testing.T) {
+func Test_whitebox_forward_intervals_cleared(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+
 	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(1),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
+		cache: NewLRUStringSWCBCache(2),
+		clock: &test_clocks.CreepingClock{T: start, Increment: (SUB_INTERVAL_LENGTH * 2) + 1},
 		log:   logs,
 	}
 
-	// put Dave in a limited state
 	limiter.AttemptAccess("Dave", 1)
-	limiter.AttemptAccess("Gary", 1)
-	if !assert.Equal(t, 1, len(logs.Lines)) {
-		return
+	cb, _ := limiter.cache.Get("Dave")
+	cb.AccessesInCurrentWindow = 100
+	cb.IntervalBuckets = []accessCounter{10, 10, 10, 10, 10, 10, 10, 10, 10, 10,}
+	cb.IndexOfLastAccess = 2
+
+	assert.True(t, limiter.AttemptAccess("Dave", 1))
+	assert.Equal(t, accessCounter(10), cb.IntervalBuckets[2])
+	assert.Equal(t, accessCounter(0), cb.IntervalBuckets[3])
+	assert.Equal(t, accessCounter(1), cb.IntervalBuckets[4])
+	assert.Equal(t, 4, cb.IndexOfLastAccess)
+}
+
+func Test_whitebox_backwards_intervals_cleared(t *testing.T) {
+	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+
+	limiter := &slidingWindowRateLimiter{
+		cache: NewLRUStringSWCBCache(2),
+		clock: &test_clocks.CreepingClock{T: start, Increment: (SUB_INTERVAL_LENGTH * 2) + 1},
+		log:   logs,
 	}
-	assert.Equal(t, "Rate limiter forced to evict a client susceptible rate limiting.", logs.Lines[0])
+
+	limiter.AttemptAccess("Dave", 1)
+	cb, _ := limiter.cache.Get("Dave")
+	cb.AccessesInCurrentWindow = 100
+	cb.IntervalBuckets = []accessCounter{10, 10, 10, 10, 10, 10, 10, 10, 10, 10,}
+	cb.IndexOfLastAccess = len(cb.IntervalBuckets) - 2
+
+	assert.True(t, limiter.AttemptAccess("Dave", 1))
+	assert.Equal(t, accessCounter(10), cb.IntervalBuckets[len(cb.IntervalBuckets)-2])
+	assert.Equal(t, accessCounter(0), cb.IntervalBuckets[len(cb.IntervalBuckets)-1])
+	assert.Equal(t, accessCounter(1), cb.IntervalBuckets[0])
+	assert.Equal(t, 0, cb.IndexOfLastAccess)
+}
+
+func Test_whitebox_same_interval_no_clear(t *testing.T) {
+	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+
+	limiter := &slidingWindowRateLimiter{
+		cache: NewLRUStringSWCBCache(2),
+		clock: &test_clocks.CreepingClock{T: start, Increment: 1},
+		log:   logs,
+	}
+
+	limiter.AttemptAccess("Dave", 1)
+	cb, _ := limiter.cache.Get("Dave")
+	cb.AccessesInCurrentWindow = 92
+	cb.IntervalBuckets = []accessCounter{10, 10, 10, 10, 10, 10, 10, 10, 1, 10,}
+	cb.IndexOfLastAccess = len(cb.IntervalBuckets) - 2
+
+	assert.True(t, limiter.AttemptAccess("Dave", 1))
+	assert.Equal(t, accessCounter(2), cb.IntervalBuckets[len(cb.IntervalBuckets)-2])
+	assert.Equal(t, len(cb.IntervalBuckets)-2, cb.IndexOfLastAccess)
+}
+
+func Test_whitebox_full_interval_step_full_clear(t *testing.T) {
+	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+
+	limiter := &slidingWindowRateLimiter{
+		cache: NewLRUStringSWCBCache(2),
+		clock: &test_clocks.CreepingClock{T: start, Increment: FULL_INTERVAL_LENGTH + 1},
+		log:   logs,
+	}
+
+	limiter.AttemptAccess("Dave", 1)
+	cb, _ := limiter.cache.Get("Dave")
+	cb.AccessesInCurrentWindow = 92
+	cb.IntervalBuckets = []accessCounter{10, 10, 10, 10, 10, 10, 10, 10, 1, 10,}
+	cb.IndexOfLastAccess = len(cb.IntervalBuckets) - 2
+
+	assert.True(t, limiter.AttemptAccess("Dave", 1))
+	assert.Equal(t, 0, cb.IndexOfLastAccess)
+	assert.Equal(t, 1, cb.AccessesInCurrentWindow)
+	assert.Equal(t, []accessCounter{1,0,0,0,0,0,0,0,0,0,}, cb.IntervalBuckets)
+}
+
+func Test_whitebox_maximum_sub_interval_clear(t *testing.T) {
+	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+
+	limiter := &slidingWindowRateLimiter{
+		cache: NewLRUStringSWCBCache(2),
+		clock: &test_clocks.CreepingClock{T: start, Increment: FULL_INTERVAL_LENGTH - SUB_INTERVAL_LENGTH + 1},
+		log:   logs,
+	}
+
+	limiter.AttemptAccess("Dave", 1)
+	cb, _ := limiter.cache.Get("Dave")
+	cb.AccessesInCurrentWindow = 100
+	cb.IntervalBuckets = []accessCounter{10, 10, 10, 10, 10, 10, 10, 10, 10, 10,}
+	cb.IndexOfLastAccess = len(cb.IntervalBuckets) - 2
+
+	limiter.AttemptAccess("Dave", 1)
+	assert.Equal(t, len(cb.IntervalBuckets) - 3, cb.IndexOfLastAccess)
+	assert.Equal(t, 11, cb.AccessesInCurrentWindow)
+	assert.Equal(t, []accessCounter{0,0,0,0,0,0,0,1,10,0,}, cb.IntervalBuckets)
 }

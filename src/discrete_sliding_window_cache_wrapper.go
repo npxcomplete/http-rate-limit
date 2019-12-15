@@ -5,7 +5,7 @@ import (
 )
 
 func NewLRUStringSWCBCache(capacity int) LRUStringSWCBCache {
-	return swcbCache{caches.NewKeyTypeValueTypeLRU(capacity)}
+	return swcbCache{caches.NewLRUCache(capacity)}
 }
 
 type LRUStringSWCBCache interface {
@@ -16,7 +16,7 @@ type LRUStringSWCBCache interface {
 }
 
 type swcbCache struct {
-	generic caches.KeyTypeValueTypeCache
+	generic caches.Interface
 }
 
 func (cache swcbCache) Put(key string, value *swcb) *swcb {

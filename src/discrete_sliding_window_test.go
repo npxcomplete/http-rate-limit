@@ -19,12 +19,17 @@ import (
 var start = time.Date(2000, 3, 12, 10, 10, 10, 0, time.UTC)
 var bound = math.Pow(2, 8*float64(unsafe.Sizeof(accessCounter(0))))
 
+var defaultConfig = SlidingWindowConfig{
+	RequestLimit:     100,
+	SubIntervalCount: 10,
+	CapacityBound:    10,
+	IntervalLength:   1 * time.Hour,
+}
+
 func Test_smoke_test_happy_path_with_http(t *testing.T) {
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(10),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Millisecond},
-		log:   &test_logger.LineLogger{make([]string, 0, 8)},
-	}
+	limiter := NewSlidingWindowRateLimiter(defaultConfig)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Millisecond}
+	limiter.log = &test_logger.LineLogger{make([]string, 0, 8)}
 
 	limitedServlet := limiter.Middleware(http.HandlerFunc(func(resp http.ResponseWriter, _ *http.Request) {
 		resp.WriteHeader(http.StatusOK)
@@ -33,7 +38,7 @@ func Test_smoke_test_happy_path_with_http(t *testing.T) {
 	req := httptest.NewRequest("GET", "/path/to/resource", &bytes.Buffer{})
 	req.RemoteAddr = "255.255.255.255"
 
-	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL; i++ {
+	for i := 0; i < defaultConfig.RequestLimit; i++ {
 		resp := httptest.NewRecorder()
 		limitedServlet.ServeHTTP(resp, req)
 		assert.Equal(t, http.StatusOK, resp.Code)
@@ -46,52 +51,47 @@ func Test_smoke_test_happy_path_with_http(t *testing.T) {
 }
 
 func Test_exceeding_rate_limit_causes_rejection(t *testing.T) {
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(10),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Millisecond},
-		log:   &test_logger.LineLogger{make([]string, 0, 8)},
-	}
+	limiter := NewSlidingWindowRateLimiter(defaultConfig)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Millisecond}
+	limiter.log = &test_logger.LineLogger{make([]string, 0, 8)}
 
-	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL; i++ {
+	for i := 0; i < defaultConfig.RequestLimit; i++ {
 		assert.True(t, limiter.AttemptAccess("Dave", 1), fmt.Sprintf("i = %d", i))
 	}
 	assert.False(t, limiter.AttemptAccess("Dave", 1), fmt.Sprintf("i = 101"))
 }
 
 func Test_reset_on_windowed_rotation(t *testing.T) {
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(10),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Minute},
-		log:   &test_logger.LineLogger{make([]string, 0, 8)},
-	}
+	limiter := NewSlidingWindowRateLimiter(defaultConfig)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Minute}
+	limiter.log = &test_logger.LineLogger{make([]string, 0, 8)}
 
-	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL*2; i++ {
+	for i := 0; i < defaultConfig.RequestLimit*2; i++ {
 		assert.True(t, limiter.AttemptAccess("Dave", 1), fmt.Sprintf("i = %d", i))
 	}
 }
 
 func Test_reset_on_giant_pause(t *testing.T) {
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(10),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 2 * time.Hour},
-		log:   &test_logger.LineLogger{make([]string, 0, 8)},
-	}
+	limiter := NewSlidingWindowRateLimiter(defaultConfig)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 2 * time.Hour}
+	limiter.log = &test_logger.LineLogger{make([]string, 0, 8)}
 
-	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL*2; i++ {
+	for i := 0; i < defaultConfig.RequestLimit*2; i++ {
 		assert.True(t, limiter.AttemptAccess("Dave", 1), fmt.Sprintf("i = %d", i))
 	}
 }
 
 func Test_cache_space_exhaustion_is_logged(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(1),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
-		log:   logs,
-	}
+	var config = defaultConfig
+	config.CapacityBound = 1
+
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second}
+	limiter.log = logs
 
 	// put Dave in a limited state
-	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL; i++ {
+	for i := 0; i < config.RequestLimit; i++ {
 		limiter.AttemptAccess("Dave", 1)
 	}
 	assert.False(t, limiter.AttemptAccess("Dave", 1))
@@ -104,14 +104,15 @@ func Test_cache_space_exhaustion_is_logged(t *testing.T) {
 
 func Test_excess_cache_space_implies_no_eviction(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
-		log:   logs,
-	}
+	var config = defaultConfig
+	config.CapacityBound = 2
+
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second}
+	limiter.log = logs
 
 	// put Dave in a limited state
-	for i := 0; i < MAX_REQUESTS_IN_FULL_INTERVAL; i++ {
+	for i := 0; i < defaultConfig.RequestLimit; i++ {
 		limiter.AttemptAccess("Dave", 1)
 	}
 	assert.False(t, limiter.AttemptAccess("Dave", 1))
@@ -122,11 +123,12 @@ func Test_excess_cache_space_implies_no_eviction(t *testing.T) {
 
 func Test_cache_eviction_of_potentially_rate_limited_clients_are_logged(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(1),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
-		log:   logs,
-	}
+	var config = defaultConfig
+	config.CapacityBound = 1
+
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second}
+	limiter.log = logs
 
 	// put Dave in a limited state
 	limiter.AttemptAccess("Dave", 1)
@@ -139,11 +141,12 @@ func Test_cache_eviction_of_potentially_rate_limited_clients_are_logged(t *testi
 
 func Test_byte_boundary_no_overflow(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second},
-		log:   logs,
-	}
+	var config = defaultConfig
+	config.CapacityBound = 2
+
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1 * time.Second}
+	limiter.log = logs
 
 	// what happens on overflow
 	bound := math.Pow(2, 8*float64(unsafe.Sizeof(accessCounter(0))))
@@ -158,12 +161,12 @@ func Test_byte_boundary_no_overflow(t *testing.T) {
 
 func Test_whitebox_forward_intervals_cleared(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	var config = defaultConfig
+	config.CapacityBound = 2
 
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: (SUB_INTERVAL_LENGTH * 2) + 1},
-		log:   logs,
-	}
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: (limiter.config.subIntervalLength * 2) + 1}
+	limiter.log = logs
 
 	limiter.AttemptAccess("Dave", 1)
 	cb, _ := limiter.cache.Get("Dave")
@@ -180,12 +183,12 @@ func Test_whitebox_forward_intervals_cleared(t *testing.T) {
 
 func Test_whitebox_backwards_intervals_cleared(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	var config = defaultConfig
+	config.CapacityBound = 2
 
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: (SUB_INTERVAL_LENGTH * 2) + 1},
-		log:   logs,
-	}
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: (limiter.config.subIntervalLength * 2) + 1}
+	limiter.log = logs
 
 	limiter.AttemptAccess("Dave", 1)
 	cb, _ := limiter.cache.Get("Dave")
@@ -202,12 +205,12 @@ func Test_whitebox_backwards_intervals_cleared(t *testing.T) {
 
 func Test_whitebox_same_interval_no_clear(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	var config = defaultConfig
+	config.CapacityBound = 2
 
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: 1},
-		log:   logs,
-	}
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: 1}
+	limiter.log = logs
 
 	limiter.AttemptAccess("Dave", 1)
 	cb, _ := limiter.cache.Get("Dave")
@@ -222,12 +225,12 @@ func Test_whitebox_same_interval_no_clear(t *testing.T) {
 
 func Test_whitebox_full_interval_step_full_clear(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	var config = defaultConfig
+	config.CapacityBound = 2
 
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: FULL_INTERVAL_LENGTH + 1},
-		log:   logs,
-	}
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: config.IntervalLength + 1}
+	limiter.log = logs
 
 	limiter.AttemptAccess("Dave", 1)
 	cb, _ := limiter.cache.Get("Dave")
@@ -238,17 +241,17 @@ func Test_whitebox_full_interval_step_full_clear(t *testing.T) {
 	assert.True(t, limiter.AttemptAccess("Dave", 1))
 	assert.Equal(t, 0, cb.IndexOfLastAccess)
 	assert.Equal(t, 1, cb.AccessesInCurrentWindow)
-	assert.Equal(t, []accessCounter{1,0,0,0,0,0,0,0,0,0,}, cb.IntervalBuckets)
+	assert.Equal(t, []accessCounter{1, 0, 0, 0, 0, 0, 0, 0, 0, 0,}, cb.IntervalBuckets)
 }
 
 func Test_whitebox_maximum_sub_interval_clear(t *testing.T) {
 	logs := &test_logger.LineLogger{make([]string, 0, 8)}
+	var config = defaultConfig
+	config.CapacityBound = 2
 
-	limiter := &slidingWindowRateLimiter{
-		cache: NewLRUStringSWCBCache(2),
-		clock: &test_clocks.CreepingClock{T: start, Increment: FULL_INTERVAL_LENGTH - SUB_INTERVAL_LENGTH + 1},
-		log:   logs,
-	}
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = &test_clocks.CreepingClock{T: start, Increment: config.IntervalLength - limiter.config.subIntervalLength + 1}
+	limiter.log = logs
 
 	limiter.AttemptAccess("Dave", 1)
 	cb, _ := limiter.cache.Get("Dave")
@@ -257,7 +260,7 @@ func Test_whitebox_maximum_sub_interval_clear(t *testing.T) {
 	cb.IndexOfLastAccess = len(cb.IntervalBuckets) - 2
 
 	limiter.AttemptAccess("Dave", 1)
-	assert.Equal(t, len(cb.IntervalBuckets) - 3, cb.IndexOfLastAccess)
+	assert.Equal(t, len(cb.IntervalBuckets)-3, cb.IndexOfLastAccess)
 	assert.Equal(t, 11, cb.AccessesInCurrentWindow)
-	assert.Equal(t, []accessCounter{0,0,0,0,0,0,0,1,10,0,}, cb.IntervalBuckets)
+	assert.Equal(t, []accessCounter{0, 0, 0, 0, 0, 0, 0, 1, 10, 0,}, cb.IntervalBuckets)
 }

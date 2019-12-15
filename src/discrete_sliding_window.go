@@ -11,18 +11,35 @@ import (
 )
 
 ///////// IMPLEMENTATION /////////
+func errorMessage(requestLimit int, intervalLength time.Duration) string {
+	return fmt.Sprintf(
+		"A maximum of %d requests may be attempted each %d hours",
+		requestLimit,
+		intervalLength/time.Hour,
+	)
+}
 
-const MAX_REQUESTS_IN_FULL_INTERVAL = 100
-const FULL_INTERVAL_LENGTH = 1 * time.Hour
-const SUB_INTERVAL_COUNT = 10
+type SlidingWindowConfig struct {
+	RequestLimit      int
+	SubIntervalCount  int
+	CapacityBound     int
+	IntervalLength    time.Duration
+	subIntervalLength time.Duration
+}
 
-const SUB_INTERVAL_LENGTH = FULL_INTERVAL_LENGTH / SUB_INTERVAL_COUNT
+func NewSlidingWindowRateLimiter(
+	config SlidingWindowConfig,
+) slidingWindowRateLimiter {
 
-var errorMessage = fmt.Sprintf(
-	"A maximum of %d requests may be attempted each %d hours",
-	MAX_REQUESTS_IN_FULL_INTERVAL,
-	FULL_INTERVAL_LENGTH/time.Hour,
-)
+	config.subIntervalLength = time.Duration(float64(config.IntervalLength) / float64(config.SubIntervalCount))
+	return slidingWindowRateLimiter{
+		cache:  NewLRUStringSWCBCache(config.CapacityBound),
+		clock:  HardwareClock{},
+		log:    StdOutLogger{},
+		config: &config,
+	}
+
+}
 
 func (limiter slidingWindowRateLimiter) Middleware(servlet http.Handler) http.HandlerFunc {
 	return func(resp http.ResponseWriter, req *http.Request) {
@@ -34,7 +51,7 @@ func (limiter slidingWindowRateLimiter) Middleware(servlet http.Handler) http.Ha
 		} // else access attempt failed
 
 		resp.WriteHeader(http.StatusTooManyRequests)
-		io.WriteString(resp, errorMessage)
+		io.WriteString(resp, errorMessage(limiter.config.RequestLimit, limiter.config.IntervalLength))
 		return
 	}
 }
@@ -48,12 +65,12 @@ func (limiter slidingWindowRateLimiter) AttemptAccess(userId string, accessCost 
 		controlBlock = &swcb{
 			StartTimeOfIntervalLastAccessed: limiter.clock.Now(),
 			IndexOfLastAccess:               0,
-			IntervalBuckets:                 make([]accessCounter, SUB_INTERVAL_COUNT),
+			IntervalBuckets:                 make([]accessCounter, limiter.config.SubIntervalCount),
 			AccessesInCurrentWindow:         0,
 		}
 
 		evicted := limiter.cache.Put(userId, controlBlock)
-		if evicted != nil && evicted.wouldBeLimited(limiter.clock) {
+		if evicted != nil && evicted.wouldBeLimited(limiter.config.IntervalLength, limiter.clock) {
 			// If you see this error message in production it's
 			// time to increase the rate limiters cache capacity or
 			// change to a more memory efficient implementation.
@@ -61,7 +78,7 @@ func (limiter slidingWindowRateLimiter) AttemptAccess(userId string, accessCost 
 		}
 	}
 
-	return controlBlock.accessAttempt(limiter.clock, accessCost)
+	return controlBlock.accessAttempt(limiter.clock, limiter.config, accessCost)
 }
 
 // Currently we need to count no higher than 100.
@@ -91,14 +108,14 @@ type swcb struct {
 	AccessesInCurrentWindow         int
 }
 
-func (cb *swcb) wouldBeLimited(clock Clock) bool {
+func (cb *swcb) wouldBeLimited(intervalLength time.Duration, clock Clock) bool {
 	now := clock.Now()
-	return cb.StartTimeOfIntervalLastAccessed.Add(FULL_INTERVAL_LENGTH).After(now)
+	return cb.StartTimeOfIntervalLastAccessed.Add(intervalLength).After(now)
 }
 
 // Updates the control block and returns true if the request is allowed to proceed.
-func (cb *swcb) accessAttempt(clock Clock, accessCost accessCounter) bool {
-	cb.reconcileSubWindows(clock.Now())
+func (cb *swcb) accessAttempt(clock Clock, config *SlidingWindowConfig, accessCost accessCounter) bool {
+	cb.reconcileSubWindows(config, clock.Now())
 
 	// The astute reader will notice that we are still incrementing the request count even when the limit has
 	// already been reached! Why? Suppose one of your clients is thoughtless / lazy. They might just be
@@ -108,7 +125,7 @@ func (cb *swcb) accessAttempt(clock Clock, accessCost accessCounter) bool {
 	// we have to deal with all their wasted traffic. Instead we continue to deny them until the end of time, OR until
 	// they wise up and start rate limiting themselves.
 
-	quotaAvailable := cb.AccessesInCurrentWindow < MAX_REQUESTS_IN_FULL_INTERVAL
+	quotaAvailable := cb.AccessesInCurrentWindow < config.RequestLimit
 
 	// increment guarding against overflow errors
 	quotaUsed := cb.IntervalBuckets[cb.IndexOfLastAccess]
@@ -127,9 +144,9 @@ func maxInt(a, b int) int {
 	}
 }
 
-func (cb *swcb) reconcileSubWindows(now time.Time) {
+func (cb *swcb) reconcileSubWindows(config *SlidingWindowConfig, now time.Time) {
 	durationSinceLastAccess := now.Sub(cb.StartTimeOfIntervalLastAccessed)
-	if durationSinceLastAccess > FULL_INTERVAL_LENGTH {
+	if durationSinceLastAccess > config.IntervalLength {
 		// re-use existing buckets to prevent memory fragmentation
 		for i := 0; i < len(cb.IntervalBuckets); i++ {
 			cb.IntervalBuckets[i] = 0
@@ -143,9 +160,9 @@ func (cb *swcb) reconcileSubWindows(now time.Time) {
 		}
 	} else {
 		// sub interval iterator
-		i := ModuloRel{value: cb.IndexOfLastAccess, mod: SUB_INTERVAL_COUNT}
+		i := ModuloRel{value: cb.IndexOfLastAccess, mod: config.SubIntervalCount}
 		// starting in interval 1 and adding 3.5 intervals should place us in interval 4
-		intervalsSinceLastAccess := int(math.Floor(float64(durationSinceLastAccess) / float64(SUB_INTERVAL_LENGTH)))
+		intervalsSinceLastAccess := int(math.Floor(float64(durationSinceLastAccess) / float64(config.subIntervalLength)))
 		// current sub interval index
 		k := i.Add(intervalsSinceLastAccess)
 
@@ -155,7 +172,7 @@ func (cb *swcb) reconcileSubWindows(now time.Time) {
 			cb.IntervalBuckets[i.value] = 0
 		}
 		cb.StartTimeOfIntervalLastAccessed =
-			cb.StartTimeOfIntervalLastAccessed.Add(time.Duration(intervalsSinceLastAccess) * SUB_INTERVAL_LENGTH)
+			cb.StartTimeOfIntervalLastAccessed.Add(time.Duration(intervalsSinceLastAccess) * config.subIntervalLength)
 		cb.IndexOfLastAccess = k.value
 	}
 }
@@ -169,6 +186,8 @@ type slidingWindowRateLimiter struct {
 	clock Clock
 
 	log Logger
+
+	config *SlidingWindowConfig
 }
 
 func uniqueUserIdentifier(req *http.Request) string {

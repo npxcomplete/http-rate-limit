@@ -1,53 +1,53 @@
 package caches
 
-type iKeyTypeValueType_NODE struct {
-	next *iKeyTypeValueType_NODE
-	prev *iKeyTypeValueType_NODE
+type lruNode struct {
+	next *lruNode
+	prev *lruNode
 
-	key   KeyType
-	value ValueType
+	key   Key
+	value Value
 }
 
-type iKeyTypeValueTypeLRU struct {
+type lruCache struct {
 	// add to head
-	head *iKeyTypeValueType_NODE
+	head *lruNode
 
 	// fast access
-	store map[KeyType]*iKeyTypeValueType_NODE
+	store map[Key]*lruNode
 
 	// full if stack == nil
-	stack *iKeyTypeValueType_NODE
+	stack *lruNode
 
 	// v_node pool, to prevent GC churn
-	nodes []iKeyTypeValueType_NODE
+	nodes []lruNode
 }
 
-func NewKeyTypeValueTypeLRU(capacity int) *iKeyTypeValueTypeLRU {
-	memoryPool := make([]iKeyTypeValueType_NODE, capacity)
+func NewLRUCache(capacity int) *lruCache {
+	memoryPool := make([]lruNode, capacity)
 	for i := 0; i < capacity-1; i++ {
 		memoryPool[i].next = &memoryPool[i+1]
 	}
 
 	// simplified nil checks
-	dummy := &iKeyTypeValueType_NODE{}
+	dummy := &lruNode{}
 
 	dummy.next = dummy
 	dummy.prev = dummy
 
-	return &iKeyTypeValueTypeLRU{
-		store: make(map[KeyType]*iKeyTypeValueType_NODE),
+	return &lruCache{
+		store: make(map[Key]*lruNode),
 		stack: &memoryPool[0],
 		head:  dummy,
 		nodes: memoryPool,
 	}
 }
 
-func (lru *iKeyTypeValueTypeLRU) Put(key KeyType, value ValueType) (evictedValue ValueType) {
-	var node *iKeyTypeValueType_NODE = nil
+func (lru *lruCache) Put(key Key, value Value) (evictedValue Value) {
+	var node *lruNode = nil
 	var ok bool
 
 	if node, ok = lru.store[key]; ok {
-		// key already present, evict present node to replace
+		// key already present, evict present lruNode to replace
 	} else if lru.stack == nil {
 		// cache full, evict the tail
 		node = lru.head.prev
@@ -87,8 +87,8 @@ func (lru *iKeyTypeValueTypeLRU) Put(key KeyType, value ValueType) (evictedValue
 	return
 }
 
-func (lru *iKeyTypeValueTypeLRU) Get(key KeyType) (value ValueType, err error) {
-	var node *iKeyTypeValueType_NODE
+func (lru *lruCache) Get(key Key) (value Value, err error) {
+	var node *lruNode
 	var ok bool
 	if node, ok = lru.store[key]; !ok {
 		err = MissingValueError

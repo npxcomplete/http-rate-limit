@@ -1,8 +1,9 @@
-package ratelimit
+package random_strings
 
 import "math/rand"
 
-var ENGLISH_ALPHABET = []byte("abcdefghijklmnopqrstuvwxyz")
+var EnglishAlphabet []byte = []byte("abcdefghijklmnopqrstuvwxyz")
+
 type ByteStringGenerator struct {
 	Alphabet  []byte
 	RandomGen *rand.Rand
@@ -14,8 +15,8 @@ func (gen *ByteStringGenerator) String(length int) string {
 
 	gen.RandomGen.Read(raw)
 
-	for i:=0 ; i<length; i++ {
-		out[i] = gen.Alphabet[int(raw[i]) % length]
+	for i := 0; i < length; i++ {
+		out[i] = gen.Alphabet[int(raw[i])%length]
 	}
 
 	return string(out)

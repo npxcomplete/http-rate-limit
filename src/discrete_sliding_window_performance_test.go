@@ -4,6 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/npxcomplete/random/src/strings"
+
 	"github.com/npxcomplete/http-rate-limit/src/test_logger"
 )
 
@@ -22,8 +24,8 @@ func Benchmark_access_attempts_on_single_user(b *testing.B) {
 }
 
 func Benchmark_cost_of_random_names(b *testing.B) {
-	gen := ByteStringGenerator{
-		Alphabet:  ENGLISH_ALPHABET,
+	gen := random_strings.ByteStringGenerator{
+		Alphabet:  random_strings.EnglishAlphabet,
 		RandomGen: rand.New(rand.NewSource(0)),
 	}
 
@@ -41,8 +43,8 @@ func Benchmark_access_attempts_on_many_users_with_high_eviction(b *testing.B) {
 	limiter.clock = HardwareClock{}
 	limiter.log = logs
 
-	gen := ByteStringGenerator{
-		Alphabet:  ENGLISH_ALPHABET,
+	gen := random_strings.ByteStringGenerator{
+		Alphabet:  random_strings.EnglishAlphabet,
 		RandomGen: rand.New(rand.NewSource(0)),
 	}
 
@@ -50,7 +52,6 @@ func Benchmark_access_attempts_on_many_users_with_high_eviction(b *testing.B) {
 		limiter.AttemptAccess(gen.String(5), 1)
 	}
 }
-
 
 func Benchmark_access_attempts_on_many_users(b *testing.B) {
 	logs := test_logger.NoopLogger{}
@@ -61,8 +62,8 @@ func Benchmark_access_attempts_on_many_users(b *testing.B) {
 	limiter.clock = HardwareClock{}
 	limiter.log = logs
 
-	gen := ByteStringGenerator{
-		Alphabet:  ENGLISH_ALPHABET,
+	gen := random_strings.ByteStringGenerator{
+		Alphabet:  random_strings.EnglishAlphabet,
 		RandomGen: rand.New(rand.NewSource(0)),
 	}
 

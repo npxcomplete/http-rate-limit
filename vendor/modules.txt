@@ -1,11 +1,9 @@
-# github.com/cheekybits/genny v1.0.0
-github.com/cheekybits/genny/generic
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
-# github.com/golang/mock v1.3.1
-github.com/golang/mock/gomock
-# github.com/npxcomplete/caches v0.0.0-20191204060423-379e5608e3de
+# github.com/npxcomplete/caches v0.0.0-20191205055913-363972c2a550
 github.com/npxcomplete/caches/src
+# github.com/npxcomplete/random v0.0.0-20191215074600-22546b7becfe
+github.com/npxcomplete/random/src/strings
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
 # github.com/stretchr/testify v1.4.0

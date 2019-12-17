@@ -1,6 +1,6 @@
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
-# github.com/npxcomplete/caches v0.0.0-20191217104004-d182341ba8fa
+# github.com/npxcomplete/caches v0.1.0
 github.com/npxcomplete/caches/src
 # github.com/npxcomplete/random v0.0.0-20191215074600-22546b7becfe
 github.com/npxcomplete/random/src/strings

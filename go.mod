@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/golang/mock v1.3.1 // indirect
-	github.com/npxcomplete/caches v0.0.0-20191217104004-d182341ba8fa
+	github.com/npxcomplete/caches v0.1.0
 	github.com/npxcomplete/random v0.0.0-20191215074600-22546b7becfe
 	github.com/stretchr/testify v1.4.0
 	go.uber.org/atomic v1.5.1 // indirect

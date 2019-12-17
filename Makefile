@@ -8,6 +8,13 @@ cover:
 	mkdir -p ./target
 	go tool cover -html=target/coverage.out -o target/coverage.html
 
+bench:
+	mkdir -p ./target
+	go test ./src/ \
+    	-bench=. \
+		-benchtime=1s\
+		-cpuprofile ./target/cpuprofile.out
+
 profile:
 	mkdir -p ./target
 	go test ./src/ \

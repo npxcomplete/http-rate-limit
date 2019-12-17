@@ -37,7 +37,7 @@ func NewLRUCache(capacity int) *lruCache {
 	dummy.prev = dummy
 
 	return &lruCache{
-		store: make(map[Key]*lruNode),
+		store: make(map[Key]*lruNode, capacity),
 		stack: &memoryPool[0],
 		head:  dummy,
 		nodes: memoryPool,

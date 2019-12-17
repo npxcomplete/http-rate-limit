@@ -71,3 +71,23 @@ func Benchmark_access_attempts_on_many_users(b *testing.B) {
 		limiter.AttemptAccess(gen.String(5), 1)
 	}
 }
+
+func Benchmark_churn_without_gen(b *testing.B) {
+	var config = defaultConfig
+	config.CapacityBound = 4
+
+	limiter := NewSlidingWindowRateLimiter(config)
+	limiter.clock = HardwareClock{}
+	limiter.log = test_logger.NoopLogger{}
+
+	keys := []string{
+		"aaaa",
+		"bbbb",
+		"cccc",
+		"dddd",
+	}
+
+	for i := 0; i < b.N; i++ {
+		limiter.AttemptAccess(keys[i % len(keys)], 1)
+	}
+}

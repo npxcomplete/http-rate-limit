@@ -23,3 +23,6 @@ flame:
 
 escape_analysis:
 	go tool pprof -alloc_space target/pkg.test target/memprofile.out
+
+gcflags:
+	go build -gcflags "-m -m" ./... 2>&1 | less -S

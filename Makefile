@@ -13,9 +13,13 @@ profile:
 	go test ./src/ \
 		-bench=$(FUNC) \
 		-benchmem \
-		-benchtime=10s\
-		-memprofile target/memprofile.out \
-		-cpuprofile target/cpuprofile.out
+		-benchtime=1s\
+		-memprofile ./target/memprofile.out \
+		-cpuprofile ./target/cpuprofile.out \
+		-o ./target/pkg.test
 
 flame:
-	go tool pprof -http=":8081" src.test target/cpuprofile.out
+	go tool pprof -http=":8081" target/pkg.test target/cpuprofile.out
+
+escape_analysis:
+	go tool pprof -alloc_space target/pkg.test target/memprofile.out

@@ -1,7 +1,8 @@
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
-# github.com/npxcomplete/caches v0.0.0-20191205055913-363972c2a550
+# github.com/npxcomplete/caches v0.1.1
 github.com/npxcomplete/caches/src
+github.com/npxcomplete/caches/src/thread_safe
 # github.com/npxcomplete/random v0.0.0-20191215074600-22546b7becfe
 github.com/npxcomplete/random/src/strings
 # github.com/pmezard/go-difflib v1.0.0

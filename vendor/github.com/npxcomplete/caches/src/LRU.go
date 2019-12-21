@@ -1,5 +1,6 @@
 package caches
 
+// 48 bytes (16 per interface, 8 per concrete pointer)
 type lruNode struct {
 	next *lruNode
 	prev *lruNode
@@ -22,6 +23,7 @@ type lruCache struct {
 	nodes []lruNode
 }
 
+// ~ 48 bytes per entry.
 func NewLRUCache(capacity int) *lruCache {
 	memoryPool := make([]lruNode, capacity)
 	for i := 0; i < capacity-1; i++ {
@@ -35,7 +37,7 @@ func NewLRUCache(capacity int) *lruCache {
 	dummy.prev = dummy
 
 	return &lruCache{
-		store: make(map[Key]*lruNode),
+		store: make(map[Key]*lruNode, capacity),
 		stack: &memoryPool[0],
 		head:  dummy,
 		nodes: memoryPool,

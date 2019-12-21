@@ -39,3 +39,8 @@ type StdOutLogger struct{}
 func (_ StdOutLogger) Error(msg string) {
 	fmt.Printf(msg)
 }
+
+type StringSWCBCache interface {
+	Put(key string, value *swcb) *swcb
+	Get(key string) (result *swcb, err error)
+}

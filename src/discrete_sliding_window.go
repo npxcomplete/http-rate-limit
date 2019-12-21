@@ -1,3 +1,5 @@
+//go:generate genny -pkg=ratelimit -in=../../caches/src/templates/LRU_wrapper.go -out=./discrete_sliding_window_cache_wrapper.go  gen "GenericKey=string GenericValue=*swcb"
+
 package ratelimit
 
 import (
@@ -5,9 +7,11 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sync"
 	"time"
 
 	caches "github.com/npxcomplete/caches/src"
+	thread_safe "github.com/npxcomplete/caches/src/thread_safe"
 )
 
 ///////// IMPLEMENTATION /////////
@@ -29,11 +33,11 @@ type SlidingWindowConfig struct {
 
 func NewSlidingWindowRateLimiter(
 	config SlidingWindowConfig,
-) slidingWindowRateLimiter {
+) *slidingWindowRateLimiter {
 
 	config.subIntervalLength = time.Duration(float64(config.IntervalLength) / float64(config.SubIntervalCount))
-	return slidingWindowRateLimiter{
-		cache:  NewLRUStringSWCBCache(config.CapacityBound),
+	return &slidingWindowRateLimiter{
+		cache:  WrapStringSwcbCache(thread_safe.NewGuardedCache(caches.NewLRUCache(config.CapacityBound))),
 		clock:  HardwareClock{},
 		log:    StdOutLogger{},
 		config: &config,
@@ -41,7 +45,7 @@ func NewSlidingWindowRateLimiter(
 
 }
 
-func (limiter slidingWindowRateLimiter) Middleware(servlet http.Handler) http.HandlerFunc {
+func (limiter *slidingWindowRateLimiter) Middleware(servlet http.Handler) http.HandlerFunc {
 	return func(resp http.ResponseWriter, req *http.Request) {
 		userId := uniqueUserIdentifier(req)
 
@@ -56,13 +60,14 @@ func (limiter slidingWindowRateLimiter) Middleware(servlet http.Handler) http.Ha
 	}
 }
 
-func (limiter slidingWindowRateLimiter) AttemptAccess(userId string, accessCost accessCounter) bool {
+func (limiter *slidingWindowRateLimiter) AttemptAccess(userId string, accessCost accessCounter) bool {
 	controlBlock, err := limiter.cache.Get(userId)
 	if err == caches.MissingValueError {
 		// this should be the only place where the rate limiter performs heap allocations
 		// Since we are dealing with a fixed size cache, If GC becomes a problem we can
 		// look at creating a static object pool to compensate, recycling the evicted element.
 		controlBlock = &swcb{
+			mutex:                           sync.Mutex{},
 			StartTimeOfIntervalLastAccessed: limiter.clock.Now(),
 			IndexOfLastAccess:               0,
 			IntervalBuckets:                 make([]accessCounter, limiter.config.SubIntervalCount),
@@ -70,12 +75,21 @@ func (limiter slidingWindowRateLimiter) AttemptAccess(userId string, accessCost 
 		}
 
 		evicted := limiter.cache.Put(userId, controlBlock)
-		if evicted != nil && evicted.wouldBeLimited(limiter.config.IntervalLength, limiter.clock) {
-			// If you see this error message in production it's
-			// time to increase the rate limiters cache capacity or
-			// change to a more memory efficient implementation.
-			limiter.log.Error("Rate limiter forced to evict a client susceptible rate limiting.")
-		}
+		func() {
+			if evicted == nil {
+				return
+			}
+
+			evicted.mutex.Lock()
+			defer evicted.mutex.Unlock()
+			if evicted.wouldBeLimited(limiter.config.IntervalLength, limiter.clock) {
+
+				// If you see this error message in production it's
+				// time to increase the rate limiters cache capacity or
+				// change to a more memory efficient implementation.
+				limiter.log.Error("Rate limiter forced to evict a client susceptible rate limiting.")
+			}
+		}()
 	}
 
 	return controlBlock.accessAttempt(limiter.clock, limiter.config, accessCost)
@@ -102,6 +116,7 @@ type accessCounter byte
 // 64 bytes + sizeof(IntervalBuckets) + 48 bytes for the cache entry overhead => 122 bytes per entry.
 // 1GB stores ~8.2M entries
 type swcb struct {
+	mutex                           sync.Mutex
 	StartTimeOfIntervalLastAccessed time.Time
 	IndexOfLastAccess               int
 	IntervalBuckets                 []accessCounter
@@ -115,6 +130,9 @@ func (cb *swcb) wouldBeLimited(intervalLength time.Duration, clock Clock) bool {
 
 // Updates the control block and returns true if the request is allowed to proceed.
 func (cb *swcb) accessAttempt(clock Clock, config *SlidingWindowConfig, accessCost accessCounter) bool {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
 	cb.reconcileSubWindows(config, clock.Now())
 
 	// The astute reader will notice that we are still incrementing the request count even when the limit has
@@ -133,6 +151,7 @@ func (cb *swcb) accessAttempt(clock Clock, config *SlidingWindowConfig, accessCo
 		cb.IntervalBuckets[cb.IndexOfLastAccess] = quotaUsed + accessCost
 		cb.AccessesInCurrentWindow = cb.AccessesInCurrentWindow + int(accessCost)
 	}
+
 	return quotaAvailable
 }
 
@@ -152,12 +171,10 @@ func (cb *swcb) reconcileSubWindows(config *SlidingWindowConfig, now time.Time) 
 			cb.IntervalBuckets[i] = 0
 		}
 
-		*cb = swcb{
-			IntervalBuckets:                 cb.IntervalBuckets,
-			AccessesInCurrentWindow:         0,
-			StartTimeOfIntervalLastAccessed: now,
-			IndexOfLastAccess:               0,
-		}
+		cb.AccessesInCurrentWindow = 0
+		cb.IndexOfLastAccess = 0
+		cb.StartTimeOfIntervalLastAccessed = now
+
 	} else {
 		// sub interval iterator
 		i := ModuloRel{value: cb.IndexOfLastAccess, mod: config.SubIntervalCount}
@@ -180,7 +197,7 @@ func (cb *swcb) reconcileSubWindows(config *SlidingWindowConfig, now time.Time) 
 type slidingWindowRateLimiter struct {
 	// Use a fixed capacity cache to memory bound our rate limiter
 	// Consequence: Only the the noisiest N clients will be rate limited.
-	cache LRUStringSWCBCache
+	cache StringSWCBCache
 
 	// for testing algorithms involving time we need a mockable time source
 	clock Clock

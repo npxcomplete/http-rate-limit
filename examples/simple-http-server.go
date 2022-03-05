@@ -1,25 +1,30 @@
 package examples
 
 import (
+	ratelimit "github.com/npxcomplete/http-rate-limit/src"
+	"github.com/npxcomplete/http-rate-limit/src/leakybucket"
 	"io"
 	"log"
 	"net/http"
-	"time"
-
-	ratelimit "github.com/npxcomplete/http-rate-limit/src"
 )
 
+var UniformLimit = leakybucket.TenantLimit{
+	Rate:  100,
+	Burst: 100,
+}
+
 func main() {
-	rateLimiter := ratelimit.NewSlidingWindowRateLimiter(ratelimit.SlidingWindowConfig{
-		RequestLimit:     100,
-		SubIntervalCount: 10,
-		CapacityBound:    5_000,
-		IntervalLength:   1 * time.Hour,
+	uniformLimits := func(tenant string) *leakybucket.TenantLimit {
+		return &UniformLimit
+	}
+	rateLimiter := leakybucket.NewRateLimiter(leakybucket.Config{
+		Tenancy:        uniformLimits,
+		TenantCapacity: 1,
 	})
 
 	log.Fatal(http.ListenAndServe(
 		":8080",
-		rateLimiter.Middleware(http.HandlerFunc(HelloWorld)),
+		ratelimit.StdMiddleware(rateLimiter)(http.HandlerFunc(HelloWorld)),
 	))
 }
 

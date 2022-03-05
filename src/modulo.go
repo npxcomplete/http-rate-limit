@@ -3,8 +3,8 @@ package ratelimit
 import "fmt"
 
 type ModuloRel struct {
-	value int
-	mod   int
+	Value int
+	Mod   int
 }
 
 func (modVal ModuloRel) Increment() ModuloRel {
@@ -13,11 +13,11 @@ func (modVal ModuloRel) Increment() ModuloRel {
 
 func (modVal ModuloRel) Add(x int) ModuloRel {
 	return ModuloRel{
-		value: (modVal.value + x) % modVal.mod,
-		mod:   modVal.mod,
+		Value: (modVal.Value + x) % modVal.Mod,
+		Mod:   modVal.Mod,
 	}
 }
 
 func (modVal ModuloRel) String() string {
-	return fmt.Sprintf("%d `mod` %d", modVal.value, modVal.mod)
+	return fmt.Sprintf("%d `Mod` %d", modVal.Value, modVal.Mod)
 }

@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -9,8 +10,34 @@ import (
 ///////// EXPORTS /////////
 
 type RateLimiter interface {
-	// Returns a servlet that rate limits access to the given servlet
-	Middleware(servlet http.Handler) http.HandlerFunc
+	AttemptAccess(userId string, requestCost uint64) bool
+}
+
+func StdMiddleware(
+	limiter RateLimiter,
+) func(servlet http.Handler) http.HandlerFunc {
+	return Middleware(limiter, UniqueTenantIdentifier, FixedRequestCost)
+}
+
+func Middleware(
+	limiter RateLimiter,
+	tenantIdentifier func(r *http.Request) string,
+	costOfRequest func(req *http.Request) uint64,
+) func(servlet http.Handler) http.HandlerFunc {
+	return func(servlet http.Handler) http.HandlerFunc {
+		return func(resp http.ResponseWriter, req *http.Request) {
+			tenantId := tenantIdentifier(req)
+
+			if limiter.AttemptAccess(tenantId, costOfRequest(req)) {
+				servlet.ServeHTTP(resp, req)
+				return
+			} // else access attempt failed
+
+			resp.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(resp, "Throttle limit exceeded.")
+			return
+		}
+	}
 }
 
 ///////// DEPENDS ON /////////
@@ -40,7 +67,13 @@ func (_ StdOutLogger) Error(msg string) {
 	fmt.Printf(msg)
 }
 
-type StringSWCBCache interface {
-	Put(key string, value *swcb) *swcb
-	Get(key string) (result *swcb, err error)
+func UniqueTenantIdentifier(req *http.Request) string {
+	return req.RemoteAddr
+}
+
+// a small nod to the fact that requests are not all created equal.
+// if some requests would take an order of magnitude more work to service,
+// then we probably need to treat user resource usage more carefully.
+func FixedRequestCost(req *http.Request) uint64 {
+	return 1
 }

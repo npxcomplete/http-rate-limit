@@ -1,22 +1,30 @@
-package ratelimit
+package leakybucket
 
 import (
+	"github.com/npxcomplete/http-rate-limit/src/test_logger"
+	random_strings "github.com/npxcomplete/random/src/strings"
 	"math/rand"
 	"sync"
 	"testing"
-
-	"github.com/npxcomplete/random/src/strings"
-
-	"github.com/npxcomplete/http-rate-limit/src/test_logger"
 )
 
-func Benchmark_access_attempts_on_single_user(b *testing.B) {
-	logs := test_logger.NoopLogger{}
-	var config = defaultConfig
-	config.CapacityBound = 2
+var uniformLimit = TenantLimit{
+	Rate:  100,
+	Burst: 100,
+}
 
-	limiter := NewSlidingWindowRateLimiter(config)
-	limiter.clock = HardwareClock{}
+func uniformLimits(tenant string) *TenantLimit {
+	return &uniformLimit
+}
+
+func Benchmark_leaky_bucket_access_attempts_on_single_user(b *testing.B) {
+	logs := test_logger.NoopLogger{}
+
+	limiter := NewRateLimiter(Config{
+		Tenancy: uniformLimits,
+		TenantCapacity: 10,
+	})
+
 	limiter.log = logs
 
 	b.ResetTimer()
@@ -25,7 +33,7 @@ func Benchmark_access_attempts_on_single_user(b *testing.B) {
 	}
 }
 
-func Benchmark_cost_of_random_names(b *testing.B) {
+func Benchmark_leaky_bucket_cost_of_random_names(b *testing.B) {
 	gen := random_strings.ByteStringGenerator{
 		Alphabet:  random_strings.EnglishAlphabet,
 		RandomGen: rand.New(rand.NewSource(0)),
@@ -37,13 +45,13 @@ func Benchmark_cost_of_random_names(b *testing.B) {
 	}
 }
 
-func Benchmark_access_attempts_on_many_users_with_high_eviction(b *testing.B) {
+func Benchmark_leaky_bucket_access_attempts_on_many_users_with_high_eviction(b *testing.B) {
 	logs := test_logger.NoopLogger{}
-	var config = defaultConfig
-	config.CapacityBound = 2
 
-	limiter := NewSlidingWindowRateLimiter(config)
-	limiter.clock = HardwareClock{}
+	limiter := NewRateLimiter(Config{
+		Tenancy: uniformLimits,
+		TenantCapacity: 10,
+	})
 	limiter.log = logs
 
 	gen := random_strings.ByteStringGenerator{
@@ -57,13 +65,12 @@ func Benchmark_access_attempts_on_many_users_with_high_eviction(b *testing.B) {
 	}
 }
 
-func Benchmark_access_attempts_on_many_users(b *testing.B) {
+func Benchmark_leaky_bucket_access_attempts_on_many_users(b *testing.B) {
 	logs := test_logger.NoopLogger{}
-	var config = defaultConfig
-	config.CapacityBound = 500
-
-	limiter := NewSlidingWindowRateLimiter(config)
-	limiter.clock = HardwareClock{}
+	limiter := NewRateLimiter(Config{
+		Tenancy: uniformLimits,
+		TenantCapacity: 10,
+	})
 	limiter.log = logs
 
 	gen := random_strings.ByteStringGenerator{
@@ -80,13 +87,12 @@ func Benchmark_access_attempts_on_many_users(b *testing.B) {
 var thread_count = 4
 var capacity = 5
 
-func Benchmark_serial_access(b *testing.B) {
+func Benchmark_leaky_bucket_serial_access(b *testing.B) {
 	logs := test_logger.NoopLogger{}
-	var config = defaultConfig
-	config.CapacityBound = capacity
-
-	limiter := NewSlidingWindowRateLimiter(config)
-	limiter.clock = HardwareClock{}
+	limiter := NewRateLimiter(Config{
+		Tenancy: uniformLimits,
+		TenantCapacity: 10,
+	})
 	limiter.log = logs
 
 	gen := random_strings.ByteStringGenerator{
@@ -104,13 +110,12 @@ func Benchmark_serial_access(b *testing.B) {
 		limiter.AttemptAccess(keys[rand.Int31n(int32(len(keys)))], 1)
 	}
 }
-func Benchmark_parallel_access(b *testing.B) {
+func Benchmark_leaky_bucket_parallel_access(b *testing.B) {
 	logs := test_logger.NoopLogger{}
-	var config = defaultConfig
-	config.CapacityBound = capacity
-
-	limiter := NewSlidingWindowRateLimiter(config)
-	limiter.clock = HardwareClock{}
+	limiter := NewRateLimiter(Config{
+		Tenancy: uniformLimits,
+		TenantCapacity: 10,
+	})
 	limiter.log = logs
 
 	gen := random_strings.ByteStringGenerator{
@@ -137,12 +142,11 @@ func Benchmark_parallel_access(b *testing.B) {
 	wg.Wait()
 }
 
-func Benchmark_churn_without_gen(b *testing.B) {
-	var config = defaultConfig
-	config.CapacityBound = 4
-
-	limiter := NewSlidingWindowRateLimiter(config)
-	limiter.clock = HardwareClock{}
+func Benchmark_leaky_bucket_churn_without_gen(b *testing.B) {
+	limiter := NewRateLimiter(Config{
+		Tenancy: uniformLimits,
+		TenantCapacity: 10,
+	})
 	limiter.log = test_logger.NoopLogger{}
 
 	keys := []string{

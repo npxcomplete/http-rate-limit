@@ -3,8 +3,9 @@ module github.com/npxcomplete/http-rate-limit
 go 1.16
 
 require (
-	github.com/golang/mock v1.3.1 // indirect
-	github.com/npxcomplete/caches v0.1.1
+        github.com/golang/mock v1.3.1 // indirect
+        github.com/aws/aws-sdk-go v1.44.314
+        github.com/npxcomplete/caches v0.1.1
 	github.com/npxcomplete/random v0.0.0-20191215074600-22546b7becfe
 	github.com/stretchr/testify v1.4.0
 	go.uber.org/atomic v1.5.1 // indirect

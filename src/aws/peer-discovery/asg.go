@@ -13,6 +13,25 @@ import (
 // DiscoverPeerIPs returns the private IP addresses of all hosts
 // that are part of the same autoscaling group as the instance
 // associated with the provided session.
+//
+// Example IAM policy required for this call:
+//
+// ```json
+//
+//	{
+//	  "Version": "2012-10-17",
+//	  "Statement": [{
+//	    "Effect": "Allow",
+//	    "Action": [
+//	      "autoscaling:DescribeAutoScalingInstances",
+//	      "autoscaling:DescribeAutoScalingGroups",
+//	      "ec2:DescribeInstances"
+//	    ],
+//	    "Resource": "*"
+//	  }]
+//	}
+//
+// ```
 func DiscoverPeerIPs(sess *session.Session) ([]string, error) {
 	meta := ec2metadata.New(sess)
 	instanceID, err := meta.GetMetadata("instance-id")

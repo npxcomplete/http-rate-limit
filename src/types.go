@@ -64,7 +64,7 @@ func (_ HardwareClock) Now() time.Time {
 type StdOutLogger struct{}
 
 func (_ StdOutLogger) Error(msg string) {
-	fmt.Printf(msg)
+	fmt.Printf("%s", msg)
 }
 
 func UniqueTenantIdentifier(req *http.Request) string {

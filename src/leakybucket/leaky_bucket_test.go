@@ -21,7 +21,7 @@ func Test_smoke_test_happy_path_with_http(t *testing.T) {
 	}
 	limiter := NewRateLimiter(config)
 	limiter.clock = test_clocks.FixedClock{T: start}
-	limiter.log = &test_logger.LineLogger{make([]string, 0, 8)}
+	limiter.log = &test_logger.LineLogger{Lines: make([]string, 0, 8)}
 
 	limitedServlet := ratelimit.StdMiddleware(limiter)(
 		http.HandlerFunc(func(resp http.ResponseWriter, _ *http.Request) {

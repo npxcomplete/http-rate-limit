@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package mesh;
+
+option go_package = "github.com/npxcomplete/http-rate-limit/src/mesh;mesh";
+
+service PeerGroup {
+    rpc JoinPeerGroup(JoinPeerGroupRequest) returns (JoinPeerGroupResponse);
+    rpc BroadcastUpdates(BroadcastUpdatesRequest) returns (BroadcastUpdatesResponse);
+}
+
+message JoinPeerGroupRequest {
+    string peer_id = 1;
+}
+
+message JoinPeerGroupResponse {
+    bool joined = 1;
+}
+
+message BroadcastUpdatesRequest {
+    repeated string updates = 1;
+}
+
+message BroadcastUpdatesResponse {
+    int32 count = 1;
+}

@@ -10,6 +10,43 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
+// metadataAPI describes the subset of the EC2 metadata client used by
+// DiscoverPeerIPs. Defined as an interface for easy mocking in tests.
+type metadataAPI interface {
+	GetMetadata(path string) (string, error)
+}
+
+// autoscalingAPI describes the calls to the AutoScaling service used by
+// DiscoverPeerIPs.
+type autoscalingAPI interface {
+	DescribeAutoScalingInstances(*autoscaling.DescribeAutoScalingInstancesInput) (*autoscaling.DescribeAutoScalingInstancesOutput, error)
+	DescribeAutoScalingGroups(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
+}
+
+// ec2API describes the EC2 calls used by DiscoverPeerIPs.
+type ec2API interface {
+	DescribeInstances(*ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error)
+}
+
+// ClientFactory provides AWS service clients required for peer discovery.
+type ClientFactory interface {
+	Metadata() metadataAPI
+	AutoScaling() autoscalingAPI
+	EC2() ec2API
+}
+
+// DefaultFactory creates real AWS service clients using the provided session.
+type DefaultFactory struct{ Sess *session.Session }
+
+// Metadata returns an EC2 metadata client.
+func (f DefaultFactory) Metadata() metadataAPI { return ec2metadata.New(f.Sess) }
+
+// AutoScaling returns an AutoScaling client.
+func (f DefaultFactory) AutoScaling() autoscalingAPI { return autoscaling.New(f.Sess) }
+
+// EC2 returns an EC2 client.
+func (f DefaultFactory) EC2() ec2API { return ec2.New(f.Sess) }
+
 // DiscoverPeerIPs returns the private IP addresses of all hosts
 // that are part of the same autoscaling group as the instance
 // associated with the provided session.
@@ -32,14 +69,17 @@ import (
 //	}
 //
 // ```
-func DiscoverPeerIPs(sess *session.Session) ([]string, error) {
-	meta := ec2metadata.New(sess)
+// DiscoverPeerIPs returns the private IP addresses of all hosts that are part
+// of the same autoscaling group as the instance returned by the metadata
+// service provided by the factory.
+func DiscoverPeerIPs(factory ClientFactory) ([]string, error) {
+	meta := factory.Metadata()
 	instanceID, err := meta.GetMetadata("instance-id")
 	if err != nil {
 		return nil, err
 	}
 
-	asgSvc := autoscaling.New(sess)
+	asgSvc := factory.AutoScaling()
 	descInstOut, err := asgSvc.DescribeAutoScalingInstances(&autoscaling.DescribeAutoScalingInstancesInput{
 		InstanceIds: []*string{aws.String(instanceID)},
 	})
@@ -67,7 +107,7 @@ func DiscoverPeerIPs(sess *session.Session) ([]string, error) {
 		instanceIDs = append(instanceIDs, inst.InstanceId)
 	}
 
-	ec2Svc := ec2.New(sess)
+	ec2Svc := factory.EC2()
 	descInst, err := ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		InstanceIds: instanceIDs,
 	})

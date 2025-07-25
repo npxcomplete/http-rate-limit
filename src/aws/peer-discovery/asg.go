@@ -75,7 +75,7 @@ func DiscoverPeerIPs(sess *session.Session) ([]string, error) {
 		return nil, err
 	}
 
-	ips := []string{}
+	var ips []string
 	for _, res := range descInst.Reservations {
 		for _, inst := range res.Instances {
 			if inst.PrivateIpAddress != nil {

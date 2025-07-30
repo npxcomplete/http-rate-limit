@@ -1,0 +1,32 @@
+syntax = "proto3";
+package com.npxcomplete.leakybucket;
+option go_package = "src/leakybucket";
+
+service LeakyBucket {
+  rpc Join(JoinRequest) returns (JoinResponse);
+  rpc Sync(SyncRequest) returns (SyncResponse);
+}
+
+message JoinRequest {
+  string Timestamp = 1;
+}
+
+message JoinResponse {
+  CapacityBook capacityBook = 1;
+}
+
+message SyncRequest {
+  CapacityChange CapacityChange = 1;
+}
+
+message SyncResponse {
+  string Timestamp = 1;
+}
+
+message CapacityBook {
+  map<string, sint64> availableCapacity = 1;
+}
+
+message CapacityChange {
+  map<string, uint32> spentCapacity = 1;
+}

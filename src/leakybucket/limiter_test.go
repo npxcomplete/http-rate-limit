@@ -2,7 +2,6 @@ package leakybucket
 
 import (
 	"bytes"
-	ratelimit "github.com/npxcomplete/http-rate-limit/src"
 	"github.com/npxcomplete/http-rate-limit/src/test_clocks"
 	"github.com/npxcomplete/http-rate-limit/src/test_logger"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +22,7 @@ func Test_smoke_test_happy_path_with_http(t *testing.T) {
 	limiter.clock = test_clocks.FixedClock{T: start}
 	limiter.log = &test_logger.LineLogger{Lines: make([]string, 0, 8)}
 
-	limitedServlet := ratelimit.StdMiddleware(limiter)(
+	limitedServlet := StdMiddleware(limiter)(
 		http.HandlerFunc(func(resp http.ResponseWriter, _ *http.Request) {
 			resp.WriteHeader(http.StatusOK)
 		}),
@@ -41,5 +40,4 @@ func Test_smoke_test_happy_path_with_http(t *testing.T) {
 	resp := httptest.NewRecorder()
 	limitedServlet.ServeHTTP(resp, req)
 	assert.Equal(t, http.StatusTooManyRequests, resp.Code)
-
 }

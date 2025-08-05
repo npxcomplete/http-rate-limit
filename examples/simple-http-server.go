@@ -1,7 +1,6 @@
 package examples
 
 import (
-	ratelimit "github.com/npxcomplete/http-rate-limit/src"
 	"github.com/npxcomplete/http-rate-limit/src/leakybucket"
 	"io"
 	"log"
@@ -22,9 +21,10 @@ func main() {
 		TenantCapacity: 1,
 	})
 
+	middleware := leakybucket.StdMiddleware(rateLimiter)
 	log.Fatal(http.ListenAndServe(
 		":8080",
-		ratelimit.StdMiddleware(rateLimiter)(http.HandlerFunc(HelloWorld)),
+		middleware(http.HandlerFunc(HelloWorld)),
 	))
 }
 

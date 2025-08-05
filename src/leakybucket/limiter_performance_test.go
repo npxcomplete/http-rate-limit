@@ -29,7 +29,7 @@ func Benchmark_leaky_bucket_access_attempts_on_single_user(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		limiter.AttemptAccess("Dave", 1)
+		limiter.AttemptAccess(1, "Dave")
 	}
 }
 
@@ -61,7 +61,7 @@ func Benchmark_leaky_bucket_access_attempts_on_many_users_with_high_eviction(b *
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		limiter.AttemptAccess(gen.String(5), 1)
+		limiter.AttemptAccess(1, gen.String(5))
 	}
 }
 
@@ -80,7 +80,7 @@ func Benchmark_leaky_bucket_access_attempts_on_many_users(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		limiter.AttemptAccess(gen.String(5), 1)
+		limiter.AttemptAccess( 1, gen.String(5))
 	}
 }
 
@@ -107,7 +107,7 @@ func Benchmark_leaky_bucket_serial_access(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		limiter.AttemptAccess(keys[rand.Int31n(int32(len(keys)))], 1)
+		limiter.AttemptAccess( 1, keys[rand.Int31n(int32(len(keys)))])
 	}
 }
 func Benchmark_leaky_bucket_parallel_access(b *testing.B) {
@@ -134,7 +134,7 @@ func Benchmark_leaky_bucket_parallel_access(b *testing.B) {
 		wg.Add(1)
 		go func() {
 			for i := 0; i < b.N; i++ {
-				limiter.AttemptAccess(keys[rand.Int31n(int32(len(keys)))], 1)
+				limiter.AttemptAccess(1, keys[rand.Int31n(int32(len(keys)))])
 			}
 			wg.Done()
 		}()
@@ -157,6 +157,6 @@ func Benchmark_leaky_bucket_churn_without_gen(b *testing.B) {
 	}
 
 	for i := 0; i < b.N; i++ {
-		limiter.AttemptAccess(keys[i%len(keys)], 1)
+		limiter.AttemptAccess(1, keys[i%len(keys)])
 	}
 }
